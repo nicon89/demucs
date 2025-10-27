@@ -395,6 +395,7 @@ class HTDemucs(nn.Module):
         if t_layers > 0 and time_channels != transformer_channels:
             self.time_to_transformer = nn.Conv1d(time_channels, transformer_channels, 1)
             self.transformer_to_time = nn.Conv1d(transformer_channels, time_channels, 1)
+            self._init_time_transformer_bridge()
         else:
             self.time_to_transformer = None
             self.transformer_to_time = None
@@ -698,3 +699,36 @@ class HTDemucs(nn.Module):
         if length_pre_pad:
             x = x[..., :length_pre_pad]
         return x
+
+    def _init_time_transformer_bridge(self) -> None:
+        if self.time_to_transformer is None or self.transformer_to_time is None:
+            return
+
+        time_channels = self.time_branch_channels
+        transformer_channels = self.transformer_channels
+
+        with torch.no_grad():
+            self.time_to_transformer.bias.zero_()
+            self.transformer_to_time.bias.zero_()
+            self.time_to_transformer.weight.zero_()
+            self.transformer_to_time.weight.zero_()
+
+            if transformer_channels % time_channels == 0:
+                ratio = transformer_channels // time_channels
+                for index in range(time_channels):
+                    start = index * ratio
+                    end = start + ratio
+                    self.time_to_transformer.weight[start:end, index, 0] = 1.0
+                    self.transformer_to_time.weight[index, start:end, 0] = 1.0 / ratio
+            elif time_channels % transformer_channels == 0:
+                ratio = time_channels // transformer_channels
+                for index in range(transformer_channels):
+                    start = index * ratio
+                    end = start + ratio
+                    self.time_to_transformer.weight[index, start:end, 0] = 1.0 / ratio
+                    self.transformer_to_time.weight[start:end, index, 0] = 1.0
+            else:
+                channels = min(time_channels, transformer_channels)
+                diag = torch.arange(channels)
+                self.time_to_transformer.weight[diag, diag, 0] = 1.0
+                self.transformer_to_time.weight[diag, diag, 0] = 1.0

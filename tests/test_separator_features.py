@@ -30,6 +30,34 @@ def tiny_audio():
 
 
 @pytest.mark.skipif(torch is None, reason="torch not available")
+def test_time_to_transformer_bridge_round_trip():
+    from demucs.htdemucs import HTDemucs
+
+    model = HTDemucs(
+        sources=["a", "b"],
+        audio_channels=1,
+        channels=4,
+        channels_time=1,
+        depth=2,
+        growth=2,
+        nfft=64,
+        segment=1,
+        t_layers=1,
+        dconv_mode=0,
+        rescale=0.0,
+    )
+
+    assert model.time_to_transformer is not None
+    assert model.transformer_to_time is not None
+
+    torch.manual_seed(0)
+    sample = torch.randn(1, model.time_branch_channels, 32)
+    projected = model.time_to_transformer(sample)
+    recovered = model.transformer_to_time(projected)
+    torch.testing.assert_close(recovered, sample, atol=1e-6, rtol=1e-6)
+
+
+@pytest.mark.skipif(torch is None, reason="torch not available")
 def test_htdemucs_8s_outputs(cpu_device, tiny_audio):
     from demucs.api import Separator
 
