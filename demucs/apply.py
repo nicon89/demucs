@@ -150,7 +150,8 @@ def apply_model(model: tp.Union[BagOfModels, Model],
                 num_workers: int = 0, segment: tp.Optional[float] = None,
                 pool=None, lock=None,
                 callback: tp.Optional[tp.Callable[[dict], None]] = None,
-                callback_arg: tp.Optional[dict] = None) -> th.Tensor:
+                callback_arg: tp.Optional[dict] = None,
+                aggregate: str = 'mean') -> th.Tensor:
     """
     Apply model to a given mixture.
 
@@ -185,6 +186,18 @@ def apply_model(model: tp.Union[BagOfModels, Model],
     callback_arg = _replace_dict(
         callback_arg, *{"model_idx_in_bag": 0, "shift_idx": 0, "segment_offset": 0}.items()
     )
+    aggregate = aggregate or 'mean'
+
+    def _aggregate_tensors(tensors: tp.List[th.Tensor]) -> th.Tensor:
+        if not tensors:
+            raise ValueError("No tensors provided for aggregation")
+        stack = th.stack(tensors, dim=0)
+        if aggregate == 'mean':
+            return stack.mean(dim=0)
+        if aggregate == 'median':
+            return stack.median(dim=0).values
+        raise ValueError(f"Unknown aggregation strategy: {aggregate}")
+
     kwargs: tp.Dict[str, tp.Any] = {
         'shifts': shifts,
         'split': split,
@@ -195,6 +208,7 @@ def apply_model(model: tp.Union[BagOfModels, Model],
         'pool': pool,
         'segment': segment,
         'lock': lock,
+        'aggregate': aggregate,
     }
     out: tp.Union[float, th.Tensor]
     res: tp.Union[float, th.Tensor]
@@ -240,7 +254,7 @@ def apply_model(model: tp.Union[BagOfModels, Model],
         mix = tensor_chunk(mix)
         assert isinstance(mix, TensorChunk)
         padded_mix = mix.padded(length + 2 * max_shift)
-        out = 0.
+        outputs: tp.List[th.Tensor] = []
         for shift_idx in range(shifts):
             offset = random.randint(0, max_shift)
             shifted = TensorChunk(padded_mix, offset, length + max_shift - offset)
@@ -250,9 +264,8 @@ def apply_model(model: tp.Union[BagOfModels, Model],
                 )
             res = apply_model(model, shifted, **kwargs, callback_arg=callback_arg)
             shifted_out = res
-            out += shifted_out[..., max_shift - offset:]
-        out /= shifts
-        assert isinstance(out, th.Tensor)
+            outputs.append(shifted_out[..., max_shift - offset:])
+        out = _aggregate_tensors(outputs)
         return out
     elif split:
         kwargs['split'] = False

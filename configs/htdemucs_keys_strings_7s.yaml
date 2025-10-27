@@ -1,0 +1,20 @@
+# Seven-stem recipe merging piano and keys while adding strings.
+
+defaults:
+  - htdemucs_6s
+
+htdemucs:
+  sources: [vocals, drums, bass, guitar, keys, strings, other]
+  channels: 52
+  channels_time: 13
+  multi_freqs: [4096, 2048, 1024]
+
+optim:
+  loss: hybrid
+  mrstft:
+    fft_sizes: [1024, 2048, 4096]
+    hop: 256
+    win_length: 2048
+    weight: 0.55
+  sisdr:
+    weight: 0.25

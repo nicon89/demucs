@@ -13,6 +13,7 @@ import typing as tp
 from dora.log import fatal, bold
 
 from .hdemucs import HDemucs
+from .htdemucs import HTDemucs
 from .repo import RemoteRepo, LocalRepo, ModelOnlyRepo, BagOnlyRepo, AnyModelRepo, ModelLoadingError  # noqa
 from .states import _check_diffq
 
@@ -22,6 +23,31 @@ REMOTE_ROOT = Path(__file__).parent / 'remote'
 
 SOURCES = ["drums", "bass", "other", "vocals"]
 DEFAULT_MODEL = 'htdemucs'
+
+
+def _build_htdemucs_6s() -> HTDemucs:
+    return HTDemucs(sources=["vocals", "drums", "bass", "guitar", "piano", "other"],
+                    channels=48, channels_time=12, segment=12, multi_freqs=[2048, 1024])
+
+
+def _build_htdemucs_8s() -> HTDemucs:
+    return HTDemucs(sources=["vocals", "drums", "bass", "guitar", "piano", "keys", "strings", "other"],
+                    channels=56, channels_time=14, segment=12, multi_freqs=[4096, 2048, 1024])
+
+
+def _build_htdemucs_7s() -> HTDemucs:
+    return HTDemucs(sources=["vocals", "drums", "bass", "guitar", "keys", "strings", "other"],
+                    channels=52, channels_time=13, segment=12, multi_freqs=[4096, 2048, 1024])
+
+
+LOCAL_MODELS = {
+    "htdemucs_6s": _build_htdemucs_6s,
+    "htdemucs_6s_tta": _build_htdemucs_6s,
+    "htdemucs_6s_mrstft": _build_htdemucs_6s,
+    "htdemucs_6s_mrstft_tta": _build_htdemucs_6s,
+    "htdemucs_8s": _build_htdemucs_8s,
+    "htdemucs_keys_strings_7s": _build_htdemucs_7s,
+}
 
 
 def demucs_unittest():
@@ -63,6 +89,10 @@ def get_model(name: str,
     """
     if name == 'demucs_unittest':
         return demucs_unittest()
+    if name in LOCAL_MODELS:
+        model = LOCAL_MODELS[name]()
+        model.eval()
+        return model
     model_repo: ModelOnlyRepo
     if repo is None:
         models = _parse_remote_files(REMOTE_ROOT / 'files.txt')

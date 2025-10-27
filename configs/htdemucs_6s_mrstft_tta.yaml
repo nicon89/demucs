@@ -1,0 +1,5 @@
+# Combined MR-STFT training recipe + aggressive TTA for evaluation.
+
+defaults:
+  - htdemucs_6s_mrstft
+  - htdemucs_6s_tta

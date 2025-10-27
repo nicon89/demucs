@@ -49,6 +49,14 @@ optim:
   optim: adam
   weight_decay: 0
   clip_grad: 0
+  mrstft:
+    fft_sizes: []
+    hop: 256
+    win_length:
+    power: 1.0
+    weight: 0.0
+  sisdr:
+    weight: 0.0
 
 seed: 42
 debug: false
@@ -70,6 +78,19 @@ augment:
     min: 0.25
     max: 1.25
   flip: true
+  eq_tilt:
+    proba: 0.0
+    gain: 3.0
+  pitch:
+    proba: 0.0
+    cents: 20
+  stretch:
+    proba: 0.0
+    min: 0.97
+    max: 1.03
+  noise:
+    proba: 0.0
+    snr: 30.0
 
 continue_from:  # continue from other XP, give the XP Dora signature.
 continue_pretrained:   # signature of a pretrained XP, this cannot be a bag of models.

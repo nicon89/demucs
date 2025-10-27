@@ -1,0 +1,15 @@
+# HTDemucs configuration with test-time augmentation presets.
+# Designed for reproducible evaluation with time flip + shift ensembling.
+
+defaults:
+  - htdemucs_6s
+
+inference:
+  tta:
+    enable: true
+    flips: true
+    shifts: 2
+    aggregator: median
+  chunking:
+    overlap: 0.5
+    transition_power: 1.5

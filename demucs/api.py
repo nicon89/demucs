@@ -32,7 +32,7 @@ from typing import Optional, Callable, Dict, Tuple, Union
 
 from .apply import apply_model, _replace_dict
 from .audio import AudioFile, convert_audio, save_audio
-from .pretrained import get_model, _parse_remote_files, REMOTE_ROOT
+from .pretrained import get_model, _parse_remote_files, REMOTE_ROOT, LOCAL_MODELS
 from .repo import RemoteRepo, LocalRepo, ModelOnlyRepo, BagOnlyRepo
 
 
@@ -65,6 +65,9 @@ class Separator:
         progress: bool = False,
         callback: Optional[Callable[[dict], None]] = None,
         callback_arg: Optional[dict] = None,
+        transition_power: float = 1.0,
+        tta_flips: bool = False,
+        tta_aggregate: str = "mean",
     ):
         """
         `class Separator`
@@ -118,9 +121,13 @@ class Separator:
         self._name = model
         self._repo = repo
         self._load_model()
+        self._transition_power = transition_power
+        self._tta_flips = tta_flips
+        self._tta_aggregate = tta_aggregate.lower()
         self.update_parameter(device=device, shifts=shifts, overlap=overlap, split=split,
                               segment=segment, jobs=jobs, progress=progress, callback=callback,
-                              callback_arg=callback_arg)
+                              callback_arg=callback_arg, transition_power=transition_power,
+                              tta_flips=tta_flips, tta_aggregate=tta_aggregate)
 
     def update_parameter(
         self,
@@ -135,6 +142,9 @@ class Separator:
             Union[Callable[[dict], None], _NotProvided]
         ] = NotProvided,
         callback_arg: Optional[Union[dict, _NotProvided]] = NotProvided,
+        transition_power: Union[float, _NotProvided] = NotProvided,
+        tta_flips: Union[bool, _NotProvided] = NotProvided,
+        tta_aggregate: Union[str, _NotProvided] = NotProvided,
     ):
         """
         Update the parameters of separation.
@@ -200,6 +210,14 @@ class Separator:
             self._callback = callback
         if not isinstance(callback_arg, _NotProvided):
             self._callback_arg = callback_arg
+        if not isinstance(transition_power, _NotProvided):
+            self._transition_power = transition_power
+        if not isinstance(tta_flips, _NotProvided):
+            self._tta_flips = tta_flips
+        if not isinstance(tta_aggregate, _NotProvided):
+            self._tta_aggregate = tta_aggregate.lower()
+        if self._tta_aggregate not in ("mean", "median"):
+            raise ValueError("tta_aggregate must be either 'mean' or 'median'")
 
     def _load_model(self):
         self._model = get_model(name=self._name, repo=self._repo)
@@ -268,9 +286,10 @@ class Separator:
         ref = wav.mean(0)
         wav -= ref.mean()
         wav /= ref.std() + 1e-8
-        out = apply_model(
+        def _forward(input_wav: th.Tensor) -> th.Tensor:
+            return apply_model(
                 self._model,
-                wav[None],
+                input_wav[None],
                 segment=self._segment,
                 shifts=self._shifts,
                 split=self._split,
@@ -279,10 +298,29 @@ class Separator:
                 num_workers=self._jobs,
                 callback=self._callback,
                 callback_arg=_replace_dict(
-                    self._callback_arg, ("audio_length", wav.shape[1])
+                    self._callback_arg, ("audio_length", input_wav.shape[1])
                 ),
                 progress=self._progress,
+                transition_power=self._transition_power,
+                aggregate=self._tta_aggregate,
             )
+
+        outputs = []
+        out = _forward(wav)
+        outputs.append(out)
+        if self._tta_flips:
+            flipped = wav.flip(-1)
+            flipped_out = _forward(flipped)
+            flipped_out = flipped_out.flip(-1)
+            outputs.append(flipped_out)
+        if len(outputs) == 1:
+            out = outputs[0]
+        else:
+            stack = th.stack(outputs, dim=0)
+            if self._tta_aggregate == "median":
+                out = stack.median(dim=0).values
+            else:
+                out = stack.mean(dim=0)
         if out is None:
             raise KeyboardInterrupt
         out *= ref.std() + 1e-8
@@ -344,7 +382,9 @@ def list_models(repo: Optional[Path] = None) -> Dict[str, Dict[str, Union[str, P
             fatal(f"{repo} must exist and be a directory.")
         model_repo = LocalRepo(repo)
         bag_repo = BagOnlyRepo(repo, model_repo)
-    return {"single": model_repo.list_model(), "bag": bag_repo.list_model()}
+    singles = set(model_repo.list_model())
+    singles.update(LOCAL_MODELS.keys())
+    return {"single": sorted(singles), "bag": bag_repo.list_model()}
 
 
 if __name__ == "__main__":

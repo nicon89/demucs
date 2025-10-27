@@ -40,6 +40,18 @@ We are also releasing an experimental 6 sources model, that adds a `guitar` and 
 Quick testing seems to show okay quality for `guitar`, but a lot of bleeding and artifacts for the `piano` source.
 
 
+## Fork additions
+
+This fork focuses on reproducible evaluation, extended instrument coverage, and inference ergonomics:
+
+- **New model presets**: `htdemucs_6s`, `htdemucs_6s_mrstft`, `htdemucs_6s_tta`, `htdemucs_6s_mrstft_tta`, `htdemucs_keys_strings_7s`, and `htdemucs_8s` add dedicated heads for guitar, piano, keys/organ, and strings. Use them via `-n htdemucs_8s` or the new configs under `configs/`.
+- **Evaluation tooling**: run `python tools/eval_baseline.py --model htdemucs_6s --subset test_small --out runs/baseline_ht6s` to generate SDR/SIR/SAR/ISR CSVs and markdown summaries on the bundled smoke dataset (`tests/fixtures/audio`).
+- **Benchmark aggregation**: compare multiple runs with `python tools/benchmark.py runs/baseline_ht6s runs/experiment_ht8s --names baseline improved` to emit markdown tables.
+- **Inference quality toggles**: the CLI now supports `--tta-flip`, `--tta-aggregate median`, and `--transition-power` for overlap-add control, plus `--deterministic` to disable cuDNN benchmarking for reproducible outputs.
+- **Output formatting**: continue to leverage `--two-stems`, `--mp3`, and the existing `--filename` template to save stems as `separated/<model>/<track>/<stem>.wav`.
+- **Guitar-focused tips**: the best starting point for tougher guitar mixes is `-n htdemucs_6s_mrstft_tta --tta-flip --tta-aggregate median --transition-power 1.5` followed by a gentle post EQ roll-off (≈2 dB @ 6 kHz).
+
+
 <p align="center">
 <img src="./demucs.png" alt="Schema representing the structure of Hybrid Transformer Demucs,
     with a dual U-Net structure, one branch for the temporal domain,
