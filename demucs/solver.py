@@ -19,6 +19,7 @@ from .ema import ModelEMA
 from .evaluate import evaluate, new_sdr
 from .svd import svd_penalty
 from .utils import pull_metric, EMA
+from .losses import MultiResolutionSTFTLoss, SISDRLoss
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,42 @@ class Solver(object):
             kw = getattr(args.augment, aug)
             if kw.proba:
                 augments.append(getattr(augment, aug.capitalize())(**kw))
+        extra_augments = {
+            'eq_tilt': augment.EQTilt,
+            'pitch': augment.PitchShift,
+            'stretch': augment.TimeStretch,
+            'noise': augment.MixWithNoise,
+        }
+        for name, cls in extra_augments.items():
+            if hasattr(args.augment, name):
+                params = getattr(args.augment, name)
+                if getattr(params, 'proba', 0):
+                    if hasattr(params, 'items'):
+                        kwargs = {key: value for key, value in params.items()}
+                    else:
+                        kwargs = dict(params)
+                    augments.append(cls(**kwargs))
         self.augment = torch.nn.Sequential(*augments)
+
+        self._mrstft_loss = None
+        self._mrstft_weight = 0.0
+        self._sisdr_loss = None
+        self._sisdr_weight = 0.0
+        if args.optim.loss == 'hybrid':
+            mr_conf = getattr(args.optim, 'mrstft', None)
+            if mr_conf is not None and getattr(mr_conf, 'fft_sizes', None):
+                self._mrstft_weight = float(getattr(mr_conf, 'weight', 1.0))
+                self._mrstft_loss = MultiResolutionSTFTLoss(
+                    fft_sizes=getattr(mr_conf, 'fft_sizes', [1024, 2048, 4096]),
+                    hop=getattr(mr_conf, 'hop', 256),
+                    win_length=getattr(mr_conf, 'win_length', None),
+                    power=getattr(mr_conf, 'power', 1.0),
+                )
+            sisdr_conf = getattr(args.optim, 'sisdr', None)
+            if sisdr_conf is not None:
+                self._sisdr_weight = float(getattr(sisdr_conf, 'weight', 0.0))
+                if self._sisdr_weight:
+                    self._sisdr_loss = SISDRLoss()
 
         xp = get_xp()
         self.folder = xp.folder
@@ -322,18 +358,32 @@ class Solver(object):
             dims = tuple(range(2, sources.dim()))
 
             if args.optim.loss == 'l1':
-                loss = F.l1_loss(estimate, sources, reduction='none')
-                loss = loss.mean(dims).mean(0)
-                reco = loss
+                loss_terms = F.l1_loss(estimate, sources, reduction='none')
+                loss_terms = loss_terms.mean(dims).mean(0)
+                reco = loss_terms
             elif args.optim.loss == 'mse':
-                loss = F.mse_loss(estimate, sources, reduction='none')
-                loss = loss.mean(dims)
-                reco = loss**0.5
+                loss_terms = F.mse_loss(estimate, sources, reduction='none')
+                loss_terms = loss_terms.mean(dims)
+                reco = loss_terms ** 0.5
                 reco = reco.mean(0)
+            elif args.optim.loss == 'hybrid':
+                loss_terms = F.l1_loss(estimate, sources, reduction='none')
+                loss_terms = loss_terms.mean(dims).mean(0)
+                reco = loss_terms
             else:
-                raise ValueError(f"Invalid loss {self.args.loss}")
+                raise ValueError(f"Invalid loss {self.args.optim.loss}")
             weights = torch.tensor(args.weights).to(sources)
-            loss = (loss * weights).sum() / weights.sum()
+            loss = (loss_terms * weights).sum() / weights.sum()
+
+            mrstft = None
+            sisdr = None
+            if args.optim.loss == 'hybrid':
+                if self._mrstft_loss is not None and self._mrstft_weight:
+                    mrstft = self._mrstft_loss(estimate, sources)
+                    loss = loss + self._mrstft_weight * mrstft
+                if self._sisdr_loss is not None and self._sisdr_weight:
+                    sisdr = self._sisdr_loss(estimate, sources)
+                    loss = loss + self._sisdr_weight * sisdr
 
             ms = 0
             if self.quantizer is not None:
@@ -344,6 +394,10 @@ class Solver(object):
             losses = {}
             losses['reco'] = (reco * weights).sum() / weights.sum()
             losses['ms'] = ms
+            if mrstft is not None:
+                losses['mrstft'] = mrstft.detach()
+            if sisdr is not None:
+                losses['sisdr'] = sisdr.detach()
 
             if not train:
                 nsdrs = new_sdr(sources, estimate.detach()).mean(0)

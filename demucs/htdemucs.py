@@ -241,6 +241,26 @@ class HTDemucs(nn.Module):
         self.freq_emb = None
         assert wiener_iters == end_iters
 
+        if multi_freqs:
+            freq_norm = float(nfft)
+            processed = []
+            for value in multi_freqs:
+                ratio = value
+                if isinstance(value, Fraction):
+                    ratio = float(value)
+                if isinstance(ratio, (int, float)):
+                    ratio = float(ratio)
+                    if ratio > 1.0:
+                        ratio /= freq_norm
+                else:
+                    ratio = float(Fraction(ratio))
+                if ratio >= 1.0:
+                    continue
+                processed.append(ratio)
+            if processed:
+                processed = sorted(processed)
+            multi_freqs = processed
+
         self.encoder = nn.ModuleList()
         self.decoder = nn.ModuleList()
 
@@ -366,6 +386,20 @@ class HTDemucs(nn.Module):
             rescale_module(self, reference=rescale)
 
         transformer_channels = channels * growth ** (depth - 1)
+        time_channels = chin
+
+        self.time_to_transformer: tp.Optional[nn.Conv1d]
+        self.transformer_to_time: tp.Optional[nn.Conv1d]
+        self.time_branch_channels = time_channels
+        self.transformer_channels = transformer_channels
+        if t_layers > 0 and time_channels != transformer_channels:
+            self.time_to_transformer = nn.Conv1d(time_channels, transformer_channels, 1)
+            self.transformer_to_time = nn.Conv1d(transformer_channels, time_channels, 1)
+            self._init_time_transformer_bridge()
+        else:
+            self.time_to_transformer = None
+            self.transformer_to_time = None
+
         if bottom_channels:
             self.channel_upsampler = nn.Conv1d(transformer_channels, bottom_channels, 1)
             self.channel_downsampler = nn.Conv1d(
@@ -583,6 +617,9 @@ class HTDemucs(nn.Module):
 
             saved.append(x)
         if self.crosstransformer:
+            if self.time_to_transformer is not None:
+                xt = self.time_to_transformer(xt)
+
             if self.bottom_channels:
                 b, c, f, t = x.shape
                 x = rearrange(x, "b c f t-> b c (f t)")
@@ -597,6 +634,9 @@ class HTDemucs(nn.Module):
                 x = self.channel_downsampler(x)
                 x = rearrange(x, "b c (f t)-> b c f t", f=f)
                 xt = self.channel_downsampler_t(xt)
+
+            if self.transformer_to_time is not None:
+                xt = self.transformer_to_time(xt)
 
         for idx, decode in enumerate(self.decoder):
             skip = saved.pop(-1)
@@ -659,3 +699,36 @@ class HTDemucs(nn.Module):
         if length_pre_pad:
             x = x[..., :length_pre_pad]
         return x
+
+    def _init_time_transformer_bridge(self) -> None:
+        if self.time_to_transformer is None or self.transformer_to_time is None:
+            return
+
+        time_channels = self.time_branch_channels
+        transformer_channels = self.transformer_channels
+
+        with torch.no_grad():
+            self.time_to_transformer.bias.zero_()
+            self.transformer_to_time.bias.zero_()
+            self.time_to_transformer.weight.zero_()
+            self.transformer_to_time.weight.zero_()
+
+            if transformer_channels % time_channels == 0:
+                ratio = transformer_channels // time_channels
+                for index in range(time_channels):
+                    start = index * ratio
+                    end = start + ratio
+                    self.time_to_transformer.weight[start:end, index, 0] = 1.0
+                    self.transformer_to_time.weight[index, start:end, 0] = 1.0 / ratio
+            elif time_channels % transformer_channels == 0:
+                ratio = time_channels // transformer_channels
+                for index in range(transformer_channels):
+                    start = index * ratio
+                    end = start + ratio
+                    self.time_to_transformer.weight[index, start:end, 0] = 1.0 / ratio
+                    self.transformer_to_time.weight[start:end, index, 0] = 1.0
+            else:
+                channels = min(time_channels, transformer_channels)
+                diag = torch.arange(channels)
+                self.time_to_transformer.weight[diag, diag, 0] = 1.0
+                self.transformer_to_time.weight[diag, diag, 0] = 1.0

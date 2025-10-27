@@ -1,0 +1,32 @@
+# Baseline HTDemucs configuration extended for 6 stems (guitar + piano).
+defaults:
+  - override /dset: musdb44
+  - override /variant: default
+
+model: htdemucs
+
+htdemucs:
+  sources: [vocals, drums, bass, guitar, piano, other]
+  segment: 12
+  shifts: 1
+  overlap: 0.25
+  channels: 48
+  channels_time: 12
+  freq_emb: 0.3
+  multi_freqs: [2048, 1024]
+
+optim:
+  loss: l1
+  lr: 3e-4
+
+augment:
+  remix:
+    proba: 1.0
+  repitch:
+    proba: 0.2
+    max_tempo: 12
+  scale:
+    proba: 1.0
+    min: 0.5
+    max: 1.2
+  shift_same: false

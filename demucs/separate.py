@@ -59,6 +59,10 @@ def get_parser():
                         default=0.25,
                         type=float,
                         help="Overlap between the splits.")
+    parser.add_argument("--transition-power",
+                        default=1.0,
+                        type=float,
+                        help="Exponent used for the overlap-add window during chunking.")
     split_group = parser.add_mutually_exclusive_group()
     split_group.add_argument("--no-split",
                              action="store_false",
@@ -72,6 +76,13 @@ def get_parser():
     parser.add_argument("--two-stems",
                         dest="stem", metavar="STEM",
                         help="Only separate audio into {STEM} and no_{STEM}. ")
+    parser.add_argument("--tta-flip",
+                        action="store_true",
+                        help="Average predictions with time-reversed inference.")
+    parser.add_argument("--tta-aggregate",
+                        choices=["mean", "median"],
+                        default="mean",
+                        help="Aggregation mode to combine TTA predictions.")
     parser.add_argument("--other-method", dest="other_method", choices=["none", "add", "minus"],
                         default="add", help='Decide how to get "no_{STEM}". "none" will not save '
                         '"no_{STEM}". "add" will add all the other stems. "minus" will use the '
@@ -96,6 +107,9 @@ def get_parser():
     parser.add_argument("--mp3-preset", choices=range(2, 8), type=int, default=2,
                         help="Encoder preset of MP3, 2 for highest quality, 7 for "
                         "fastest speed. Default is 2")
+    parser.add_argument("--deterministic",
+                        action="store_true",
+                        help="Enable deterministic inference and disable cuDNN benchmarking.")
     parser.add_argument("-j", "--jobs",
                         default=0,
                         type=int,
@@ -119,6 +133,18 @@ def main(opts=None):
         print("error: the following arguments are required: tracks", file=sys.stderr)
         sys.exit(1)
 
+    if args.deterministic:
+        th.manual_seed(0)
+        if th.cuda.is_available():
+            th.cuda.manual_seed_all(0)
+        try:
+            th.use_deterministic_algorithms(True)
+        except Exception:
+            pass
+        if th.backends.cudnn.is_available():
+            th.backends.cudnn.deterministic = True
+            th.backends.cudnn.benchmark = False
+
     try:
         separator = Separator(model=args.name,
                               repo=args.repo,
@@ -126,6 +152,9 @@ def main(opts=None):
                               shifts=args.shifts,
                               split=args.split,
                               overlap=args.overlap,
+                              transition_power=args.transition_power,
+                              tta_flips=args.tta_flip,
+                              tta_aggregate=args.tta_aggregate,
                               progress=True,
                               jobs=args.jobs,
                               segment=args.segment)

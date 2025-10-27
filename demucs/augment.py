@@ -9,6 +9,7 @@
 import random
 import torch as th
 from torch import nn
+from torch.nn import functional as F
 
 
 class Shift(nn.Module):
@@ -109,3 +110,85 @@ class Scale(nn.Module):
             scales = th.empty(batch, streams, 1, 1, device=device).uniform_(self.min, self.max)
             wav *= scales
         return wav
+
+
+class EQTilt(nn.Module):
+    """Applies a gentle spectral tilt implemented via FFT magnitudes."""
+
+    def __init__(self, proba=0.0, gain=3.0):
+        super().__init__()
+        self.proba = proba
+        self.gain = gain
+
+    def forward(self, wav):
+        if not self.training or random.random() >= self.proba:
+            return wav
+        batch_shape = wav.shape
+        flat = wav.reshape(-1, batch_shape[-1])
+        spectrum = th.fft.rfft(flat, dim=-1)
+        freqs = th.linspace(0, 1, spectrum.shape[-1], device=wav.device, dtype=wav.dtype)
+        direction = random.choice([-1.0, 1.0])
+        magnitude = random.random() * (self.gain / 6.0)
+        tilt = 1.0 + direction * magnitude * (freqs - 0.5)
+        tilt = tilt.clamp(min=0.25)
+        spectrum = spectrum * tilt
+        tilted = th.fft.irfft(spectrum, n=batch_shape[-1], dim=-1)
+        return tilted.reshape(batch_shape)
+
+
+class PitchShift(nn.Module):
+    """Approximate pitch shift via linear resampling."""
+
+    def __init__(self, proba=0.0, cents=20):
+        super().__init__()
+        self.proba = proba
+        self.cents = cents
+
+    def forward(self, wav):
+        if not self.training or random.random() >= self.proba or self.cents <= 0:
+            return wav
+        ratio = 2 ** (random.uniform(-self.cents, self.cents) / 1200.0)
+        time = wav.shape[-1]
+        target = max(8, int(time / ratio))
+        flat = wav.reshape(-1, 1, time)
+        stretched = F.interpolate(flat, size=target, mode='linear', align_corners=False)
+        restored = F.interpolate(stretched, size=time, mode='linear', align_corners=False)
+        return restored.reshape_as(wav)
+
+
+class TimeStretch(nn.Module):
+    """Random time stretching using linear interpolation."""
+
+    def __init__(self, proba=0.0, min=0.97, max=1.03):
+        super().__init__()
+        self.proba = proba
+        self.min = min
+        self.max = max
+
+    def forward(self, wav):
+        if not self.training or random.random() >= self.proba:
+            return wav
+        ratio = random.uniform(self.min, self.max)
+        time = wav.shape[-1]
+        target = max(8, int(time * ratio))
+        flat = wav.reshape(-1, 1, time)
+        stretched = F.interpolate(flat, size=target, mode='linear', align_corners=False)
+        restored = F.interpolate(stretched, size=time, mode='linear', align_corners=False)
+        return restored.reshape_as(wav)
+
+
+class MixWithNoise(nn.Module):
+    """Adds low level Gaussian noise to the mixture."""
+
+    def __init__(self, proba=0.0, snr=30.0):
+        super().__init__()
+        self.proba = proba
+        self.snr = snr
+
+    def forward(self, wav):
+        if not self.training or random.random() >= self.proba:
+            return wav
+        power = wav.pow(2).mean(dim=-1, keepdim=True)
+        target_power = power / (10 ** (self.snr / 10.0))
+        noise = th.randn_like(wav) * (target_power.sqrt())
+        return wav + noise
