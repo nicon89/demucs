@@ -241,6 +241,26 @@ class HTDemucs(nn.Module):
         self.freq_emb = None
         assert wiener_iters == end_iters
 
+        if multi_freqs:
+            freq_norm = float(nfft)
+            processed = []
+            for value in multi_freqs:
+                ratio = value
+                if isinstance(value, Fraction):
+                    ratio = float(value)
+                if isinstance(ratio, (int, float)):
+                    ratio = float(ratio)
+                    if ratio > 1.0:
+                        ratio /= freq_norm
+                else:
+                    ratio = float(Fraction(ratio))
+                if ratio >= 1.0:
+                    continue
+                processed.append(ratio)
+            if processed:
+                processed = sorted(processed)
+            multi_freqs = processed
+
         self.encoder = nn.ModuleList()
         self.decoder = nn.ModuleList()
 

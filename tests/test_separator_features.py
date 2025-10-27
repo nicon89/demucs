@@ -42,6 +42,22 @@ def test_htdemucs_8s_outputs(cpu_device, tiny_audio):
 
 
 @pytest.mark.skipif(torch is None, reason="torch not available")
+def test_htdemucs_8s_small_segment_chunk(cpu_device, tiny_audio):
+    from demucs.api import Separator
+
+    separator = Separator(
+        model="htdemucs_8s",
+        device=cpu_device,
+        split=True,
+        progress=False,
+        segment=7,
+        shifts=0,
+    )
+    _, stems = separator.separate_tensor(tiny_audio, separator.samplerate)
+    assert stems["strings"].shape[-1] == tiny_audio.shape[-1]
+
+
+@pytest.mark.skipif(torch is None, reason="torch not available")
 def test_deterministic_separator(tmp_path, cpu_device, tiny_audio):
     from demucs.api import Separator
 
