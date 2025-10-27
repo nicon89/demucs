@@ -386,6 +386,19 @@ class HTDemucs(nn.Module):
             rescale_module(self, reference=rescale)
 
         transformer_channels = channels * growth ** (depth - 1)
+        time_channels = chin
+
+        self.time_to_transformer: tp.Optional[nn.Conv1d]
+        self.transformer_to_time: tp.Optional[nn.Conv1d]
+        self.time_branch_channels = time_channels
+        self.transformer_channels = transformer_channels
+        if t_layers > 0 and time_channels != transformer_channels:
+            self.time_to_transformer = nn.Conv1d(time_channels, transformer_channels, 1)
+            self.transformer_to_time = nn.Conv1d(transformer_channels, time_channels, 1)
+        else:
+            self.time_to_transformer = None
+            self.transformer_to_time = None
+
         if bottom_channels:
             self.channel_upsampler = nn.Conv1d(transformer_channels, bottom_channels, 1)
             self.channel_downsampler = nn.Conv1d(
@@ -603,6 +616,9 @@ class HTDemucs(nn.Module):
 
             saved.append(x)
         if self.crosstransformer:
+            if self.time_to_transformer is not None:
+                xt = self.time_to_transformer(xt)
+
             if self.bottom_channels:
                 b, c, f, t = x.shape
                 x = rearrange(x, "b c f t-> b c (f t)")
@@ -617,6 +633,9 @@ class HTDemucs(nn.Module):
                 x = self.channel_downsampler(x)
                 x = rearrange(x, "b c (f t)-> b c f t", f=f)
                 xt = self.channel_downsampler_t(xt)
+
+            if self.transformer_to_time is not None:
+                xt = self.transformer_to_time(xt)
 
         for idx, decode in enumerate(self.decoder):
             skip = saved.pop(-1)
