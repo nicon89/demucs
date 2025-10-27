@@ -48,6 +48,60 @@ width="800px"></p>
 
 
 
+## Choosing a separator backend
+
+NutifAI ships with two interchangeable separators that expose the same user interface:
+
+* `bs-roformer` – the new default backend. It provides a lightweight, CPU friendly spectral splitter
+  that requires no additional downloads and works out of the box in smoke tests.
+* `demucs` – the historical Hybrid Demucs models. Use this backend when you require the high quality
+  transformer checkpoints published with the original project. The backend keeps using the `-n/--name`
+  flag to select a pretrained Demucs model.
+
+Both backends emit the canonical stems (`vocals`, `drums`, `bass`, `other`). If a backend cannot produce
+a particular stem it is remapped to the `other` stem with a warning so that downstream tooling keeps
+working.
+
+### Installation notes
+
+The BS-RoFormer backend is self-contained and only depends on PyTorch and Torchaudio. The Demucs backend
+still requires the pretrained weights that ship with the original project; run with `--separator demucs`
+to access them.
+
+### CLI usage
+
+Select the backend with the new `--separator` flag (defaults to `bs-roformer`):
+
+```bash
+python -m demucs.separate --separator bs-roformer test.mp3
+python -m demucs.separate --separator demucs -n htdemucs test.mp3
+```
+
+The flag works with any existing options. For instance, to run on GPU and export MP3 stems using the new
+backend:
+
+```bash
+python -m demucs.separate test.mp3 --separator bs-roformer --device cuda --mp3 --mp3-bitrate 192
+```
+
+### Python API
+
+Use :func:`demucs.api.create_separator_backend` to instantiate a backend from code:
+
+```python
+from pathlib import Path
+
+from demucs.api import create_separator_backend
+
+separator = create_separator_backend("bs-roformer", device="cpu")
+mix, stems = separator.separate_audio_file(Path("test.mp3"))
+```
+
+Call :func:`demucs.api.available_separator_backends` to discover the registered backends and implement
+your own selection logic. Existing calls to :class:`demucs.api.Separator` continue to load the Demucs
+models without any code changes.
+
+
 ## Important news if you are already using Demucs
 
 See the [release notes](./docs/release.md) for more details.

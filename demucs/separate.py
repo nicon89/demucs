@@ -11,7 +11,12 @@ from pathlib import Path
 from dora.log import fatal
 import torch as th
 
-from .api import Separator, save_audio, list_models
+from .api import (
+    save_audio,
+    list_models,
+    available_separator_backends,
+    create_separator_backend,
+)
 
 from .apply import BagOfModels
 from .htdemucs import HTDemucs
@@ -25,6 +30,12 @@ def get_parser():
     add_model_flags(parser)
     parser.add_argument("--list-models", action="store_true", help="List available models "
                         "from current repo and exit")
+    parser.add_argument(
+        "--separator",
+        choices=list(available_separator_backends()),
+        default="bs-roformer",
+        help="Separator backend to use. Default is bs-roformer.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-o",
                         "--out",
@@ -109,6 +120,8 @@ def main(opts=None):
     parser = get_parser()
     args = parser.parse_args(opts)
     if args.list_models:
+        if args.separator != "demucs":
+            fatal("--list-models is only available for the demucs backend.")
         models = list_models(args.repo)
         print("Bag of models:", end="\n    ")
         print("\n    ".join(models["bag"]))
@@ -120,15 +133,18 @@ def main(opts=None):
         sys.exit(1)
 
     try:
-        separator = Separator(model=args.name,
-                              repo=args.repo,
-                              device=args.device,
-                              shifts=args.shifts,
-                              split=args.split,
-                              overlap=args.overlap,
-                              progress=True,
-                              jobs=args.jobs,
-                              segment=args.segment)
+        separator = create_separator_backend(
+            args.separator,
+            model=args.name,
+            repo=args.repo,
+            device=args.device,
+            shifts=args.shifts,
+            split=args.split,
+            overlap=args.overlap,
+            progress=True,
+            jobs=args.jobs,
+            segment=args.segment,
+        )
     except ModelLoadingError as error:
         fatal(error.args[0])
 
@@ -154,7 +170,12 @@ def main(opts=None):
                 stem=args.stem, sources=", ".join(separator.model.sources)
             )
         )
-    out = args.out / args.name
+    model_name = getattr(separator.model, "name", args.name)
+    if args.separator == "demucs":
+        folder_name = model_name
+    else:
+        folder_name = f"{args.separator}-{model_name}"
+    out = args.out / folder_name
     out.mkdir(parents=True, exist_ok=True)
     print(f"Separated tracks will be stored in {out.resolve()}")
     for track in args.tracks:

@@ -320,6 +320,26 @@ class Separator:
         return self._model
 
 
+def create_separator_backend(backend: str = "bs-roformer", **kwargs):
+    """Instantiate a separator from the backend registry.
+
+    The helper defers the import to avoid circular dependencies with the backend
+    wrappers.  Parameters are passed verbatim to the backend factory.
+    """
+
+    from .backends import create_separator as _create_separator  # local import
+
+    return _create_separator(backend, **kwargs)
+
+
+def available_separator_backends():
+    """Return the names of registered separator backends."""
+
+    from .backends import available_backends  # local import
+
+    return tuple(available_backends())
+
+
 def list_models(repo: Optional[Path] = None) -> Dict[str, Dict[str, Union[str, Path]]]:
     """
     List the available models. Please remember that not all the returned models can be

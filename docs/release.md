@@ -2,6 +2,14 @@
 
 ## V4.1.0a, TBD
 
+* Added the BS-RoFormer backend alongside the classic Demucs wrapper. The CLI now
+  accepts `--separator {bs-roformer,demucs}` with the lightweight BS-RoFormer backend
+  enabled by default.
+* Introduced a backend registry accessible through the public API to make it easier
+  to plug the new separator into existing workflows without touching legacy code.
+* Added `tools/benchmark_separators.py` to generate SDR/SIR/SAR comparisons and track
+  runtime/memory differences between backends on a shared fixture set.
+
 Get models list
 
 Check segment of HTDemucs inside BagOfModels
